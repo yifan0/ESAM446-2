@@ -35,16 +35,59 @@ class Fourier(Basis):
             raise NotImplementedError("Can only perform transforms for float64 or complex128")
 
     def _transform_to_grid_complex(self, data, axis, scale):
-        pass
+        # input is coefficient with hw index and hw norm
+        coeff_hw_hw = data
+        # scaling: put in zeros in place of extended coefficients
+        coeff_hw_hw = np.concatenate((coeff_hw_hw[0:int(self.N/2)], np.zeros(int(self.N*(scale-1))),coeff_hw_hw[int(self.N/2):self.N]))
+        # change to scipy index, hw norm
+        # coeff_sp_hw = np.append(coeff_hw_hw[int(self.N/2):self.N],coeff_hw_hw[0:int(self.N/2)])
+        coeff_sp_hw = coeff_hw_hw
+        # scipy index, scipy norm
+        coeff_sp_sp = coeff_sp_hw*(int(self.N*scale))
+        # ifft
+        grid = scipy.fft.ifft(coeff_sp_sp)
+        return grid
 
     def _transform_to_coeff_complex(self, data, axis):
-        pass
+        # fft transform grid to scipy index, scipy norm
+        coeff_sp_sp = scipy.fft.fft(data)
+        N_scaled = len(coeff_sp_sp)
+        # get rid of extended coefficients
+        coeff_sp_sp = np.concatenate((coeff_sp_sp[0:int(self.N/2)], coeff_sp_sp[-int(self.N/2):]))
+        # change to scipy index, hw norm
+        coeff_sp_hw = coeff_sp_sp/N_scaled
+        # change to hw index, hw norm
+        # coeff_hw_hw = np.append(coeff_sp_hw[int(self.N/2):self.N],coeff_sp_hw[0:int(self.N/2)])
+        coeff_hw_hw = coeff_sp_hw
+        # Nyquist node = 0
+        # coeff_hw_hw[int(self.N/2)] = 0
+        return coeff_hw_hw
 
     def _transform_to_grid_real(self, data, axis, scale):
-        pass
+        # convert coefficients of real mode to that of complex mode
+        coeff_real = data
+        coeff_comp = np.zeros(self.N, dtype=np.complex128)
+        coeff_comp[0] = coeff_real[0]
+        for i in range(1,int(self.N/2)):
+            coeff_comp[i] = coeff_real[2*i]/2 - coeff_real[2*i+1]/2j 
+            coeff_comp[-i] = coeff_real[2*i]/2 + coeff_real[2*i+1]/2j
+        # transform to grid as in complex Fourier mode case
+        grid = self._transform_to_grid_complex(coeff_comp,axis,scale)
+        return grid
 
     def _transform_to_coeff_real(self, data, axis):
-        pass
+        coeff_comp =  self._transform_to_coeff_complex(data, axis)
+        # convert coefficients of complex mode to that of real one
+        coeff_real = np.zeros(self.N, dtype=np.complex128)
+        coeff_real[0] = coeff_comp[0]
+        for i in range(2,self.N):
+            if (i%2 == 0):
+                index_c = int(i/2)
+                coeff_real[i] = coeff_comp[index_c] + coeff_comp[-index_c]
+            else:
+                index_c = int(i/2)
+                coeff_real[i] = (-coeff_comp[index_c] + coeff_comp[-index_c])*1j
+        return coeff_real
 
 
 class Field:
