@@ -1,7 +1,7 @@
 
 import pytest
 import numpy as np
-from spectral_soln import Fourier, Field
+from spectral import Fourier, Field
 from numpy.random import default_rng
 
 @pytest.mark.parametrize('N', [64])
