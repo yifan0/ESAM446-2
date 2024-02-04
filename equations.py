@@ -79,7 +79,7 @@ class SHEquation:
             diag = (1-self.kx**2)**2 - r
             p.L = sparse.diags(diag)
         else:
-            p.L = (sparse.eye(self.N)-sparse.diags(self.kx**2))@(sparse.eye(self.N)-sparse.diags(self.kx**2)) - sparse.diags(r)
+            p.L = (sparse.eye(self.N)-sparse.diags(self.kx**2))@(sparse.eye(self.N)-sparse.diags(self.kx**2)) - sparse.diags(np.repeat(r,self.N))
         pass
 
     def evolve(self, timestepper, dt, num_steps):
