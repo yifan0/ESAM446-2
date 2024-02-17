@@ -1,103 +1,150 @@
 
-import numpy as np
 import spectral
+import numpy as np
 from scipy import sparse
 
-class KdVEquation:
 
-    def __init__(self, u):
-        dtype = u.dtype
+class SoundWaves:
+
+    def __init__(self, u, p, p0):
         self.u = u
-        x_basis = u.bases[0]
-        # print(x_basis)
-        # print(x_basis.wavenumbers(dtype))
-        self.dudx = spectral.Field([x_basis],dtype=dtype)
-        self.RHS = spectral.Field([x_basis],dtype=dtype)
-        self.problem = spectral.InitialValueProblem([self.u],[self.RHS])
-        p = self.problem.subproblems[0]
+        self.p = p
+        self.x_basis = u.bases[0]
+        self.dtype = dtype = u.dtype
+        self.u_RHS = spectral.Field([self.x_basis],dtype=dtype)
+        self.p_RHS = spectral.Field([self.x_basis],dtype=dtype)
+        self.p0 = p0
+        self.L = self.x_basis.interval
+        self.L = self.L[1]-self.L[0]
 
-        self.N = x_basis.N
-        self.kx = x_basis.wavenumbers(dtype)
-        p.M = sparse.eye(self.N)
-        if dtype == np.complex128:
-            p.L = sparse.diags(-1j*self.kx**3)
-        else:
-            upper_diag = np.zeros(self.N-1)
-            upper_diag[::2] = x_basis.wavenumbers(dtype)[::2]**3
-            lower_diag = - upper_diag
-            p.L = sparse.diags([upper_diag, lower_diag], offsets=[1, -1])
-            # print(p.L.A[:6,:6])
-        pass
+
+        self.problem = spectral.InitialValueProblem([u,p], [self.u_RHS, self.p_RHS], num_BCs=2)
+        sp = self.problem.subproblems[0]
+        self.N = N = self.x_basis.N
+        # M matrix
+        diag = (np.arange(N-1)+1)*(2/self.L)
+        self.D = D = sparse.diags(diag, offsets=1)
+
+        diag0 = np.ones(N)/2
+        diag0[0] = 1
+        diag2 = -np.ones(N-2)/2
+        self.C = C = sparse.diags((diag0, diag2), offsets=(0,2))
+        
+        M = sparse.csr_matrix((2*N+2,2*N+2))
+        M[0:N, 0:N] = C
+        M[N:2*N, N:2*N] = C
+        sp.M = M
+
+        # L matrix
+        BC_rows = np.zeros((2,2*N))
+        i = np.arange(N)
+        BC_rows[0,:N] = (-1)**i
+        BC_rows[1,:N] = (+1)**i
+
+
+        cols = np.zeros((2*N,2))
+        cols[N-1, 0] = 1
+        cols[N-2, 1] = 1
+
+        corner = np.zeros((2,2))
+
+        Z = np.zeros((N, N))
+        L = sparse.bmat([[Z, D],
+                         [D, Z]])
+        L = sparse.bmat([[L,cols],
+                        [BC_rows,corner]])
+
+        sp.L = L
+        self.t = 0
 
     def evolve(self, timestepper, dt, num_steps):
         ts = timestepper(self.problem)
         u = self.u
-        x_basis = u.bases[0]
-        dtype = u.dtype
-        dudx = self.dudx
-        RHS = self.RHS
-        kx = self.kx
-        # print(x_basis.wavenumbers(dtype))
+        p = self.p
+        p0 = self.p0
+        p_RHS = self.p_RHS
         for i in range(num_steps):
+            # take a timestep
             u.require_coeff_space()
-            dudx.require_coeff_space()
-            if dtype == np.complex128:
-                dudx.data = 1j*kx*u.data
-            else:
-                upper_diag = np.zeros(self.N-1)
-                upper_diag[::2] = -x_basis.wavenumbers(dtype)[::2]
-                lower_diag = - upper_diag
-                D = sparse.diags([upper_diag, lower_diag], offsets=[1, -1])
-                # print(D.A[:6,:6])
-                # break
-                dudx.data = D@u.data
-            u.require_grid_space(scales=3/2)
-            dudx.require_grid_space(scales=3/2)
-            RHS.require_grid_space(scales=3/2)
-            RHS.data = 6 * u.data * dudx.data
+            p.require_coeff_space()
+            p_RHS.require_coeff_space()
+            p_RHS.data = self.D@u.data
+            p_RHS.require_grid_space()
+            p_RHS.data = (1-p0.data)*p_RHS.data
+            ts.step(dt,[0,0])
+            self.t += dt
 
-            ts.step(dt)
+
+class CGLEquation:
+
+    def __init__(self, u):
         pass
+
+    def evolve(self, timestepper, dt, num_steps):
+        ts = timestepper(self.problem)
+
+        for i in range(num_steps):
+            # take a timestep
+            pass
+
+
+class KdVEquation:
+    
+    def __init__(self, domain, u):
+        dtype = u.dtype
+        self.dealias = 3/2
+        self.u = u
+        self.u_RHS = spectral.Field(domain, dtype=dtype)
+        self.dudx = spectral.Field(domain, dtype=dtype)
+        self.problem = spectral.InitialValueProblem(domain, [u], [self.u_RHS], dtype=dtype)
+        
+        p = self.problem.pencils[0]
+        x_basis = domain.bases[0]
+        I = sparse.eye(x_basis.N)
+        p.M = I
+        D = x_basis.derivative_matrix(dtype)
+        p.L = D@D@D
+        
+    def evolve(self, timestepper, dt, num_steps):
+        ts = timestepper(self.problem)
+        u = self.u
+        dudx = self.dudx
+        u_RHS = self.u_RHS
+        for i in range(num_steps):
+            dudx.require_coeff_space()
+            u.require_coeff_space()
+            dudx.data = u.differentiate(0)
+            u.require_grid_space(scales=self.dealias)
+            dudx.require_grid_space(scales=self.dealias)
+            u_RHS.require_grid_space(scales=self.dealias)
+            u_RHS.data = 6*u.data*dudx.data
+            ts.step(dt)
+
 
 class SHEquation:
 
-    def __init__(self, u):
+    def __init__(self, domain, u):
         dtype = u.dtype
+        self.dealias = 2
         self.u = u
-        x_basis = u.bases[0]
-        r = -0.3
+        self.u_RHS = spectral.Field(domain, dtype=dtype)
+        self.problem = spectral.InitialValueProblem(domain, [u], [self.u_RHS], dtype=dtype)
 
-        self.dudx = spectral.Field([x_basis],dtype=dtype)
-        self.RHS = spectral.Field([x_basis],dtype=dtype)
-        self.problem = spectral.InitialValueProblem([self.u],[self.RHS])
-        p = self.problem.subproblems[0]
-
-        self.N = x_basis.N
-        self.kx = x_basis.wavenumbers(dtype)
-        p.M = sparse.eye(self.N)
-        if dtype == np.complex128:
-            diag = (1-self.kx**2)**2 - r
-            p.L = sparse.diags(diag)
-        else:
-            p.L = (sparse.eye(self.N)-sparse.diags(self.kx**2))@(sparse.eye(self.N)-sparse.diags(self.kx**2)) - sparse.diags(np.repeat(r,self.N))
-        pass
+        p = self.problem.pencils[0]
+        x_basis = domain.bases[0]
+        I = sparse.eye(x_basis.N)
+        p.M = I
+        D = x_basis.derivative_matrix(dtype)
+        op = I + D@D
+        p.L = op @ op + 0.3*I
 
     def evolve(self, timestepper, dt, num_steps):
         ts = timestepper(self.problem)
         u = self.u
-        x_basis = u.bases[0]
-        dtype = u.dtype
-        dudx = self.dudx
-        RHS = self.RHS
-        kx = self.kx
-        # print(x_basis.wavenumbers(dtype))
+        u_RHS = self.u_RHS
         for i in range(num_steps):
             u.require_coeff_space()
-            u.require_grid_space(scales=2)
-            RHS.require_grid_space(scales=2)
-            RHS.data = u.data * u.data * (1.8 - u.data)
-
+            u.require_grid_space(scales=self.dealias)
+            u_RHS.require_grid_space(scales=self.dealias)
+            u_RHS.data = 1.8*u.data**2 - u.data**3
             ts.step(dt)
-        pass
-
-
