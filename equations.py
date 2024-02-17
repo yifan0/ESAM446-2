@@ -2,7 +2,7 @@
 import spectral
 import numpy as np
 from scipy import sparse
-
+from scipy.sparse import linalg as spla
 
 class SoundWaves:
 
@@ -62,15 +62,26 @@ class SoundWaves:
         u = self.u
         p = self.p
         p0 = self.p0
+        p0.require_coeff_space()
+        p0.require_grid_space(scales=2)
         p_RHS = self.p_RHS
         for i in range(num_steps):
             # take a timestep
             u.require_coeff_space()
             p.require_coeff_space()
+            # T basis
             p_RHS.require_coeff_space()
-            p_RHS.data = self.D@u.data
-            p_RHS.require_grid_space()
+            # derivative in U basis
+            p_RHS.data = self.D@u.data 
+            # from U basis to T basis
+            p_RHS.data = spla.spsolve(self.C,p_RHS.data)
+            p_RHS.require_grid_space(scales=2)
+            # multiplication on grid space
             p_RHS.data = (1-p0.data)*p_RHS.data
+            # to T basis
+            p_RHS.require_coeff_space()
+            # to U basis
+            p_RHS.data = self.C@p_RHS.data 
             ts.step(dt,[0,0])
             self.t += dt
 
@@ -148,3 +159,72 @@ class SHEquation:
             u_RHS.require_grid_space(scales=self.dealias)
             u_RHS.data = 1.8*u.data**2 - u.data**3
             ts.step(dt)
+
+# waves_variable_errors = {32: 4e-2, 64: 3e-4, 128: 1e-12}
+# N = 32
+# dtype = np.float64
+
+
+# x_basis = spectral.Chebyshev(N, interval=(0, 3))
+# x = x_basis.grid()
+# u = spectral.Field([x_basis], dtype=dtype)
+# p = spectral.Field([x_basis], dtype=dtype)
+# p0 = spectral.Field([x_basis], dtype=dtype)
+
+# u.require_grid_space()
+# u.data = np.exp(-(x-0.5)**2/0.01)
+
+# p0.require_grid_space()
+# p0.data = 0.1 + x**2/9
+# # print(x)
+# # print(p0.data)
+# waves = SoundWaves(u, p, p0)
+
+# # check sparsity of M and L matrices
+# assert len(waves.problem.subproblems[0].M.data) < 5*N
+# assert len(waves.problem.subproblems[0].L.data) < 5*N
+
+# waves.evolve(spectral.SBDF2, 2e-3, 5000)
+
+# p.require_coeff_space()
+# p.require_grid_space(scales=256//N)
+
+# sol = np.loadtxt('waves_variable.dat')
+
+# error = np.max(np.abs(sol - p.data))
+# print(error)
+# print(waves_variable_errors[N])
+
+# waves_const_errors = {32: 0.2, 64: 5e-3, 128: 1e-8}
+# N=32
+# dtype = np.float64
+
+
+# x_basis = spectral.Chebyshev(N, interval=(0, 3))
+# x = x_basis.grid()
+# u = spectral.Field([x_basis], dtype=dtype)
+# p = spectral.Field([x_basis], dtype=dtype)
+# p0 = spectral.Field([x_basis], dtype=dtype)
+
+# u.require_grid_space()
+# u.data = np.exp(-(x-0.5)**2/0.01)
+
+# p0.require_grid_space()
+# p0.data = 1 + 0*x
+
+# waves = SoundWaves(u, p, p0)
+
+# # check sparsity of M and L matrices
+# assert len(waves.problem.subproblems[0].M.data) < 5*N
+# assert len(waves.problem.subproblems[0].L.data) < 5*N
+
+# waves.evolve(spectral.SBDF2, 2e-3, 5000)
+
+# p.require_coeff_space()
+# p.require_grid_space(scales=256//N)
+
+# sol = np.loadtxt('waves_const.dat')
+
+# error = np.max(np.abs(sol - p.data))
+# print(error)
+# print(waves_const_errors[N])
