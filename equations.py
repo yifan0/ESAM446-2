@@ -89,14 +89,67 @@ class SoundWaves:
 class CGLEquation:
 
     def __init__(self, u):
-        pass
+        self.u = u
+        self.x_basis = u.bases[0]
+        self.dtype = dtype = u.dtype
+        self.u_RHS = spectral.Field([self.x_basis],dtype=dtype)
+        self.L = self.x_basis.interval
+        self.L = self.L[1]-self.L[0]
+
+
+        self.problem = spectral.InitialValueProblem([u], [self.u_RHS], num_BCs=2)
+        sp = self.problem.subproblems[0]
+        self.N = N = self.x_basis.N
+        # M matrix
+        diag = (np.arange(N-1)+1)*(2/self.L)
+        self.D = D = sparse.diags(diag, offsets=1)
+
+        diag0 = np.ones(N)/2
+        diag0[0] = 1
+        diag2 = -np.ones(N-2)/2
+        self.C = C = sparse.diags((diag0, diag2), offsets=(0,2))
+        
+        M = sparse.csr_matrix((N+2,N+2))
+        M[0:N, 0:N] = D
+        sp.M = M
+
+        # L matrix
+        BC_rows = np.zeros((2,N))
+        i = np.arange(N)
+        BC_rows[0,:N] = (-1)**i
+        BC_rows[1,:N] = (+1)**i
+
+
+        cols = np.zeros((N,2))
+        cols[N-1, 0] = 1
+        cols[N-2, 1] = 1
+
+        corner = np.zeros((2,2))
+
+        L = sparse.bmat([[-C,cols],
+                        [BC_rows,corner]])
+
+        sp.L = L
+        self.t = 0
 
     def evolve(self, timestepper, dt, num_steps):
         ts = timestepper(self.problem)
-
+        u = self.u
+        u_RHS = self.u_RHS
+        b = 0.5
+        c = -1.76
         for i in range(num_steps):
             # take a timestep
-            pass
+            u.require_coeff_space()
+            u_RHS.data = self.D @ u.data
+            u_RHS.data = spla.spsolve(self.C, u_RHS.data)
+            u_RHS.require_grid_space(scales=2)
+            u.require_grid_space(scales=2)
+            u_RHS.data = (1+b*1j)*u_RHS.data*u_RHS.data - (1+c*1j)*np.conj(u.data)*u.data*u.data
+            u_RHS.require_coeff_space()
+            u_RHS.data = self.C @ u_RHS.data
+            ts.step(dt,[0,0])
+            self.t += dt
 
 
 class KdVEquation:
