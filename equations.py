@@ -33,6 +33,7 @@ class SoundWaves:
         M = sparse.csr_matrix((2*N+2,2*N+2))
         M[0:N, 0:N] = C
         M[N:2*N, N:2*N] = C
+        M.eliminate_zeros()
         sp.M = M
 
         # L matrix
@@ -55,6 +56,7 @@ class SoundWaves:
                         [BC_rows,corner]])
 
         sp.L = L
+        L.eliminate_zeros()
         self.t = 0
 
     def evolve(self, timestepper, dt, num_steps):
@@ -93,11 +95,15 @@ class CGLEquation:
         self.x_basis = u.bases[0]
         self.dtype = dtype = u.dtype
         self.u_RHS = spectral.Field([self.x_basis],dtype=dtype)
+        self.dudx2 = spectral.Field([self.x_basis],dtype=dtype)
+        self.ux = spectral.Field([self.x_basis],dtype=dtype)
+        self.ux_RHS = spectral.Field([self.x_basis],dtype=dtype)
         self.L = self.x_basis.interval
         self.L = self.L[1]-self.L[0]
+        self.b = 0.5
+        self.c = -1.76
 
-
-        self.problem = spectral.InitialValueProblem([u], [self.u_RHS], num_BCs=2)
+        self.problem = spectral.InitialValueProblem([self.u,self.ux], [self.u_RHS,self.ux_RHS], num_BCs=2)
         sp = self.problem.subproblems[0]
         self.N = N = self.x_basis.N
         # M matrix
@@ -109,45 +115,62 @@ class CGLEquation:
         diag2 = -np.ones(N-2)/2
         self.C = C = sparse.diags((diag0, diag2), offsets=(0,2))
         
-        M = sparse.csr_matrix((N+2,N+2))
-        M[0:N, 0:N] = D
+        M = sparse.csr_matrix((2*N+2,2*N+2))
+        M[N:2*N, 0:N] = C
+        M.eliminate_zeros()
         sp.M = M
 
         # L matrix
-        BC_rows = np.zeros((2,N))
+        BC_rows = np.zeros((2,2*N))
         i = np.arange(N)
         BC_rows[0,:N] = (-1)**i
         BC_rows[1,:N] = (+1)**i
 
 
-        cols = np.zeros((N,2))
+        cols = np.zeros((2*N,2))
         cols[N-1, 0] = 1
-        cols[N-2, 1] = 1
+        cols[2*N-1, 1] = 1
 
         corner = np.zeros((2,2))
 
-        L = sparse.bmat([[-C,cols],
+        Z = np.zeros((N, N))
+        L = sparse.bmat([[D, -C],
+                         [-C, -D]])
+        L = sparse.bmat([[L,cols],
                         [BC_rows,corner]])
 
+        L.eliminate_zeros()
         sp.L = L
         self.t = 0
 
     def evolve(self, timestepper, dt, num_steps):
         ts = timestepper(self.problem)
         u = self.u
+        ux = self.ux
+        dudx2 = self.dudx2
         u_RHS = self.u_RHS
-        b = 0.5
-        c = -1.76
+        ux_RHS = self.ux_RHS
+        b = self.b
+        c = self.c
         for i in range(num_steps):
             # take a timestep
             u.require_coeff_space()
-            u_RHS.data = self.D @ u.data
-            u_RHS.data = spla.spsolve(self.C, u_RHS.data)
-            u_RHS.require_grid_space(scales=2)
+            ux.require_coeff_space()
+            ux_RHS.require_coeff_space()
+            dudx2.require_coeff_space()
+
+            dudx2.data = self.D @ ux.data
+            dudx2.data = spla.spsolve(self.C,dudx2.data)
+            dudx2.require_grid_space(scales=2)
+            dudx2.data = (b*1j)*dudx2.data
+
+
+            ux_RHS.require_grid_space(scales=2)
             u.require_grid_space(scales=2)
-            u_RHS.data = (1+b*1j)*u_RHS.data*u_RHS.data - (1+c*1j)*np.conj(u.data)*u.data*u.data
-            u_RHS.require_coeff_space()
-            u_RHS.data = self.C @ u_RHS.data
+            ux_RHS.data = dudx2.data - (1+c*1j)*np.conj(u.data)*u.data*u.data
+            # print(ux_RHS.data)
+            ux_RHS.require_coeff_space()
+            ux_RHS.data = self.C @ ux_RHS.data
             ts.step(dt,[0,0])
             self.t += dt
 
@@ -250,7 +273,7 @@ class SHEquation:
 
 # waves_const_errors = {32: 0.2, 64: 5e-3, 128: 1e-8}
 # N=32
-# dtype = np.float64
+# dtype = np.complex64
 
 
 # x_basis = spectral.Chebyshev(N, interval=(0, 3))
@@ -265,13 +288,13 @@ class SHEquation:
 # p0.require_grid_space()
 # p0.data = 1 + 0*x
 
-# waves = SoundWaves(u, p, p0)
+# waves = CGLEquation(u)
 
-# # check sparsity of M and L matrices
+# check sparsity of M and L matrices
 # assert len(waves.problem.subproblems[0].M.data) < 5*N
 # assert len(waves.problem.subproblems[0].L.data) < 5*N
 
-# waves.evolve(spectral.SBDF2, 2e-3, 5000)
+# waves.evolve(spectral.SBDF2, 2e-3, 60)
 
 # p.require_coeff_space()
 # p.require_grid_space(scales=256//N)
