@@ -135,7 +135,7 @@ class CGLEquation:
 
         Z = np.zeros((N, N))
         L = sparse.bmat([[D, -C],
-                         [-C, -D]])
+                         [-C, -(1+self.b*1j)*D]])
         L = sparse.bmat([[L,cols],
                         [BC_rows,corner]])
 
@@ -159,15 +159,16 @@ class CGLEquation:
             ux_RHS.require_coeff_space()
             dudx2.require_coeff_space()
 
-            dudx2.data = self.D @ ux.data
-            dudx2.data = spla.spsolve(self.C,dudx2.data)
-            dudx2.require_grid_space(scales=2)
-            dudx2.data = (b*1j)*dudx2.data
+            # dudx2.data = self.D @ ux.data
+            # dudx2.data = spla.spsolve(self.C,dudx2.data)
+            # dudx2.require_grid_space(scales=2)
+            # dudx2.data = (b*1j)*dudx2.data
 
 
             ux_RHS.require_grid_space(scales=2)
             u.require_grid_space(scales=2)
-            ux_RHS.data = dudx2.data - (1+c*1j)*np.conj(u.data)*u.data*u.data
+            # ux_RHS.data = dudx2.data - (1+c*1j)*np.conj(u.data)*u.data*u.data
+            ux_RHS.data = - (1+c*1j)*np.conj(u.data)*u.data*u.data
             # print(ux_RHS.data)
             ux_RHS.require_coeff_space()
             ux_RHS.data = self.C @ ux_RHS.data
@@ -272,32 +273,32 @@ class SHEquation:
 # print(waves_variable_errors[N])
 
 # waves_const_errors = {32: 0.2, 64: 5e-3, 128: 1e-8}
-# N=32
-# dtype = np.complex64
+N=32
+dtype = np.complex64
 
 
-# x_basis = spectral.Chebyshev(N, interval=(0, 3))
-# x = x_basis.grid()
-# u = spectral.Field([x_basis], dtype=dtype)
-# p = spectral.Field([x_basis], dtype=dtype)
-# p0 = spectral.Field([x_basis], dtype=dtype)
+x_basis = spectral.Chebyshev(N, interval=(0, 3))
+x = x_basis.grid()
+u = spectral.Field([x_basis], dtype=dtype)
+p = spectral.Field([x_basis], dtype=dtype)
+p0 = spectral.Field([x_basis], dtype=dtype)
 
-# u.require_grid_space()
-# u.data = np.exp(-(x-0.5)**2/0.01)
+u.require_grid_space()
+u.data = np.exp(-(x-0.5)**2/0.01)
 
-# p0.require_grid_space()
-# p0.data = 1 + 0*x
+p0.require_grid_space()
+p0.data = 1 + 0*x
 
-# waves = CGLEquation(u)
+waves = CGLEquation(u)
 
 # check sparsity of M and L matrices
 # assert len(waves.problem.subproblems[0].M.data) < 5*N
 # assert len(waves.problem.subproblems[0].L.data) < 5*N
 
-# waves.evolve(spectral.SBDF2, 2e-3, 60)
+waves.evolve(spectral.SBDF2, 2e-3, 5000)
 
-# p.require_coeff_space()
-# p.require_grid_space(scales=256//N)
+p.require_coeff_space()
+p.require_grid_space(scales=256//N)
 
 # sol = np.loadtxt('waves_const.dat')
 
